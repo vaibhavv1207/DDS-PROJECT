@@ -213,18 +213,8 @@ def play_audio_alarm(sound_path="assets/sounds/alarm.mp3"):
 #  ALERT MANAGER – Central Dispatcher
 # ══════════════════════════════════════════
 class AlertManager:
-    """
-    Central alert dispatcher with cooldown.
-    Prevents alert spam — waits COOLDOWN_SECONDS between alerts.
-
-    Usage:
-        alerter = AlertManager()
-        alerter.trigger(channels=["audio", "sms", "call"])
-    """
-
-    COOLDOWN_SECONDS = 30  # Wait 30s before firing alerts again
-
-    def __init__(self):
+    def __init__(self, cooldown=30):
+        self.COOLDOWN_SECONDS = cooldown
         self._last_alert_time = None
         self._alert_count     = 0
 
@@ -235,55 +225,28 @@ class AlertManager:
         return elapsed < self.COOLDOWN_SECONDS
 
     def seconds_until_next(self):
-        """Returns seconds remaining in cooldown (0 if not in cooldown)."""
         if self._last_alert_time is None:
             return 0
         elapsed = (datetime.now() - self._last_alert_time).seconds
-        remaining = self.COOLDOWN_SECONDS - elapsed
-        return max(0, remaining)
+        return max(0, self.COOLDOWN_SECONDS - elapsed)
 
-    def trigger(self, channels=None):
-        """
-        Fire alerts on specified channels.
-
-        channels options:
-            "audio"    – plays alarm sound immediately
-            "sms"      – sends Twilio SMS
-            "call"     – makes Twilio voice call
-            "whatsapp" – sends WhatsApp message
-            "email"    – sends Gmail email
-
-        Default: ["audio", "sms", "call"]
-        """
+    def trigger(self, channels=None, reason=""):
         if self._in_cooldown():
-            remaining = self.seconds_until_next()
-            print(f"[⏳ COOLDOWN] Next alert in {remaining}s – skipping.")
+            print(f"[⏳ COOLDOWN] Next alert in {self.seconds_until_next()}s")
             return
-
         if channels is None:
-            channels = ["audio", "sms", "call"]
-
+            channels = ["audio"]
         self._last_alert_time = datetime.now()
         self._alert_count    += 1
-
         print(f"\n{'='*45}")
-        print(f"  🚨 ALERT #{self._alert_count} FIRING")
+        print(f"  🚨 ALERT #{self._alert_count}")
         print(f"  Channels : {', '.join(channels)}")
+        if reason:
+            print(f"  Reason   : {reason}")
         print(f"  Time     : {self._last_alert_time.strftime('%H:%M:%S')}")
         print(f"{'='*45}")
-
-        # Fire each channel in its own thread so they run simultaneously
-        if "audio"    in channels:
-            play_audio_alarm()
-
-        if "sms"      in channels:
-            threading.Thread(target=send_twilio_sms,     daemon=True).start()
-
-        if "call"     in channels:
-            threading.Thread(target=send_twilio_call,    daemon=True).start()
-
-        if "whatsapp" in channels:
-            threading.Thread(target=send_whatsapp_alert, daemon=True).start()
-
-        if "email"    in channels:
-            threading.Thread(target=send_email_alert,    daemon=True).start()
+        if "audio"    in channels: play_audio_alarm()
+        if "sms"      in channels: threading.Thread(target=lambda: send_twilio_sms(f"DDS ALERT: {reason}"),        daemon=True).start()
+        if "call"     in channels: threading.Thread(target=send_twilio_call,                                        daemon=True).start()
+        if "whatsapp" in channels: threading.Thread(target=lambda: send_whatsapp_alert(f"*DDS ALERT*\n{reason}"),  daemon=True).start()
+        if "email"    in channels: threading.Thread(target=send_email_alert,                                        daemon=True).start()
