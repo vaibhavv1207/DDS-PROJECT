@@ -1,12 +1,14 @@
 # phase1_core/alerter.py
 # ─────────────────────────────────────────
-#  All Alert Channels – Phase 1
-#  Twilio Call · SMS · WhatsApp · Email · Audio
+#  All Alert Channels – Phase 1 & 2
+#  Audio loops continuously until driver wakes
+#  Calls/SMS/Email fire after confirmed delay
 # ─────────────────────────────────────────
 
 import os
 import smtplib
 import threading
+import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
@@ -15,238 +17,220 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-# ══════════════════════════════════════════
-#  CHANNEL 1 – Twilio Voice Call
-# ══════════════════════════════════════════
 def send_twilio_call():
-    """
-    Makes an automated voice call to ALERT_PHONE_NUMBER.
-    Speaks a warning message using Twilio's text-to-speech.
-    """
     try:
         from twilio.rest import Client
-        client = Client(
-            os.getenv("TWILIO_ACCOUNT_SID"),
-            os.getenv("TWILIO_AUTH_TOKEN")
-        )
+        client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
         call = client.calls.create(
-            twiml='''
-                <Response>
-                    <Say voice="alice" loop="2">
-                        Warning! Warning! The driver appears to be drowsy.
-                        Please pull over immediately and take a rest.
-                        This is an automated alert from the Driver Drowsy Detection System.
-                    </Say>
-                </Response>
-            ''',
+            twiml='''<Response>
+                <Say voice="alice" loop="3">
+                    Warning! Warning! The driver appears to be drowsy.
+                    Please pull over immediately and take a rest.
+                    This is an automated alert from the Driver Drowsy Detection System.
+                </Say>
+            </Response>''',
             to=os.getenv("ALERT_PHONE_NUMBER"),
             from_=os.getenv("TWILIO_PHONE_NUMBER"),
         )
-        print(f"[✅ CALL] Voice call initiated → SID: {call.sid}")
-        return True
+        print(f"[OK CALL] Initiated -> {call.sid}")
     except Exception as e:
-        print(f"[❌ CALL] Failed: {e}")
-        return False
+        print(f"[ERR CALL] {e}")
 
 
-# ══════════════════════════════════════════
-#  CHANNEL 2 – Twilio SMS
-# ══════════════════════════════════════════
 def send_twilio_sms(message=None):
-    """
-    Sends an SMS to ALERT_PHONE_NUMBER via Twilio.
-    """
     try:
         from twilio.rest import Client
+        now = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
         if not message:
-            now     = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
-            message = (
-                f"🚨 DDS ALERT 🚨\n"
-                f"Drowsiness detected!\n"
-                f"Time: {now}\n"
-                f"Please check on the driver immediately."
-            )
-        client = Client(
-            os.getenv("TWILIO_ACCOUNT_SID"),
-            os.getenv("TWILIO_AUTH_TOKEN")
-        )
+            message = f"DDS ALERT - Drowsiness confirmed! Time: {now}. Check on the driver immediately."
+        client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
         msg = client.messages.create(
             body=message,
             to=os.getenv("ALERT_PHONE_NUMBER"),
             from_=os.getenv("TWILIO_PHONE_NUMBER"),
         )
-        print(f"[✅ SMS] Sent → SID: {msg.sid}")
-        return True
+        print(f"[OK SMS] Sent -> {msg.sid}")
     except Exception as e:
-        print(f"[❌ SMS] Failed: {e}")
-        return False
+        print(f"[ERR SMS] {e}")
 
 
-# ══════════════════════════════════════════
-#  CHANNEL 3 – WhatsApp via Twilio Sandbox
-# ══════════════════════════════════════════
 def send_whatsapp_alert(message=None):
-    """
-    Sends WhatsApp message via Twilio Sandbox.
-    Make sure you have joined the sandbox first:
-    Twilio Console → Messaging → Try it out → Send a WhatsApp message
-    """
     try:
         from twilio.rest import Client
+        now = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
         if not message:
-            now     = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
-            message = (
-                f"🚨 *DDS ALERT* 🚨\n\n"
-                f"*Drowsiness Detected!*\n"
-                f"🕐 Time: {now}\n\n"
-                f"Please check on the driver immediately.\n"
-                f"_— Driver Drowsy Detection System_"
-            )
-        client = Client(
-            os.getenv("TWILIO_ACCOUNT_SID"),
-            os.getenv("TWILIO_AUTH_TOKEN")
-        )
-        msg = client.messages.create(
+            message = f"DDS ALERT\nDrowsiness Confirmed!\nTime: {now}\nCheck on the driver immediately!"
+        client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
+        client.messages.create(
             body=message,
             to=os.getenv("WHATSAPP_TO"),
             from_=os.getenv("WHATSAPP_FROM"),
         )
-        print(f"[✅ WHATSAPP] Sent → SID: {msg.sid}")
-        return True
+        print("[OK WHATSAPP] Sent.")
     except Exception as e:
-        print(f"[❌ WHATSAPP] Failed: {e}")
-        return False
+        print(f"[ERR WHATSAPP] {e}")
 
 
-# ══════════════════════════════════════════
-#  CHANNEL 4 – Email via Gmail SMTP
-# ══════════════════════════════════════════
-def send_email_alert():
-    """
-    Sends an email alert via Gmail SMTP.
-    Use Gmail App Password (not your regular password).
-    Generate at: myaccount.google.com → Security → App Passwords
-    """
+def send_email_alert(reason=""):
     try:
         sender   = os.getenv("EMAIL_SENDER")
         password = os.getenv("EMAIL_PASSWORD")
         receiver = os.getenv("EMAIL_RECEIVER")
         now      = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
-
-        # Build email
         msg            = MIMEMultipart("alternative")
-        msg["Subject"] = f"🚨 DDS Alert – Drowsiness Detected at {now}"
+        msg["Subject"] = f"DDS Alert - Drowsiness Confirmed at {now}"
         msg["From"]    = sender
         msg["To"]      = receiver
-
-        # Plain text version
-        text = (
-            f"DROWSINESS ALERT\n\n"
-            f"Time     : {now}\n"
-            f"Status   : Drowsiness detected by DDS system\n"
-            f"Action   : Please check on the driver immediately!\n\n"
-            f"-- Driver Drowsy Detection System"
-        )
-
-        # HTML version
-        html = f"""
-        <html><body>
-        <div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;border:2px solid #e53e3e;border-radius:8px;overflow:hidden;">
+        text = f"DROWSINESS CONFIRMED\nTime: {now}\nSignals: {reason}\nCheck on the driver immediately!"
+        html = f"""<html><body>
+        <div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;
+                    border:2px solid #e53e3e;border-radius:8px;overflow:hidden;">
           <div style="background:#e53e3e;padding:16px;text-align:center;">
-            <h2 style="color:white;margin:0;">🚨 DROWSINESS ALERT</h2>
+            <h2 style="color:white;margin:0;">DROWSINESS CONFIRMED</h2>
           </div>
           <div style="padding:20px;background:#fff8f8;">
-            <p style="font-size:16px;color:#333;"><strong>Time:</strong> {now}</p>
-            <p style="font-size:16px;color:#333;"><strong>Status:</strong> Drowsiness detected</p>
-            <p style="font-size:16px;color:#e53e3e;"><strong>⚠️ Please check on the driver immediately!</strong></p>
+            <p><strong>Time:</strong> {now}</p>
+            <p><strong>Signals:</strong> {reason}</p>
+            <p style="color:#e53e3e;"><strong>Check on the driver immediately!</strong></p>
           </div>
-          <div style="padding:12px;background:#fff0f0;text-align:center;">
-            <small style="color:#999;">Driver Drowsy Detection System – Automated Alert</small>
-          </div>
-        </div>
-        </body></html>
-        """
-
+        </div></body></html>"""
         msg.attach(MIMEText(text, "plain"))
-        msg.attach(MIMEText(html, "html"))
-
+        msg.attach(MIMEText(html,  "html"))
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(sender, password)
             server.sendmail(sender, receiver, msg.as_string())
-
-        print(f"[✅ EMAIL] Sent to {receiver}")
-        return True
+        print(f"[OK EMAIL] Sent to {receiver}")
     except Exception as e:
-        print(f"[❌ EMAIL] Failed: {e}")
-        return False
+        print(f"[ERR EMAIL] {e}")
 
 
-# ══════════════════════════════════════════
-#  CHANNEL 5 – Audio Alarm
-# ══════════════════════════════════════════
-def play_audio_alarm(sound_path="assets/sounds/alarm.mp3"):
+class AudioAlarm:
     """
-    Plays audio alarm through speakers.
-    Falls back to terminal bell if no sound file.
-    Put any alarm.mp3 in assets/sounds/ folder.
-    Free alarm sounds: https://freesound.org
+    Continuous looping audio alarm.
+    start() - begins looping
+    stop()  - stops when driver wakes up
     """
-    def _play():
-        try:
-            from playsound import playsound
-            if os.path.exists(sound_path):
-                playsound(sound_path)
-                print("[✅ AUDIO] Alarm played.")
-            else:
-                # Fallback: terminal bell 3 times
-                for _ in range(3):
-                    print("\a", end="", flush=True)
-                print("[⚠️  AUDIO] No alarm.mp3 found in assets/sounds/ – using terminal bell.")
-                print("           Download a free alarm sound and save as assets/sounds/alarm.mp3")
-        except Exception as e:
-            print(f"[❌ AUDIO] Failed: {e}")
+    def __init__(self, sound_path="assets/sounds/alarm.mp3"):
+        self.sound_path = sound_path
+        self._playing   = False
+        self._thread    = None
 
-    threading.Thread(target=_play, daemon=True).start()
-
-
-# ══════════════════════════════════════════
-#  ALERT MANAGER – Central Dispatcher
-# ══════════════════════════════════════════
-class AlertManager:
-    def __init__(self, cooldown=30):
-        self.COOLDOWN_SECONDS = cooldown
-        self._last_alert_time = None
-        self._alert_count     = 0
-
-    def _in_cooldown(self):
-        if self._last_alert_time is None:
-            return False
-        elapsed = (datetime.now() - self._last_alert_time).seconds
-        return elapsed < self.COOLDOWN_SECONDS
-
-    def seconds_until_next(self):
-        if self._last_alert_time is None:
-            return 0
-        elapsed = (datetime.now() - self._last_alert_time).seconds
-        return max(0, self.COOLDOWN_SECONDS - elapsed)
-
-    def trigger(self, channels=None, reason=""):
-        if self._in_cooldown():
-            print(f"[⏳ COOLDOWN] Next alert in {self.seconds_until_next()}s")
+    def start(self):
+        if self._playing:
             return
-        if channels is None:
-            channels = ["audio"]
-        self._last_alert_time = datetime.now()
-        self._alert_count    += 1
-        print(f"\n{'='*45}")
-        print(f"  🚨 ALERT #{self._alert_count}")
-        print(f"  Channels : {', '.join(channels)}")
-        if reason:
-            print(f"  Reason   : {reason}")
-        print(f"  Time     : {self._last_alert_time.strftime('%H:%M:%S')}")
-        print(f"{'='*45}")
-        if "audio"    in channels: play_audio_alarm()
-        if "sms"      in channels: threading.Thread(target=lambda: send_twilio_sms(f"DDS ALERT: {reason}"),        daemon=True).start()
-        if "call"     in channels: threading.Thread(target=send_twilio_call,                                        daemon=True).start()
-        if "whatsapp" in channels: threading.Thread(target=lambda: send_whatsapp_alert(f"*DDS ALERT*\n{reason}"),  daemon=True).start()
-        if "email"    in channels: threading.Thread(target=send_email_alert,                                        daemon=True).start()
+        self._playing = True
+        self._thread  = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+        print("[AUDIO] Alarm started - looping.")
+
+    def stop(self):
+        if self._playing:
+            self._playing = False
+            print("[AUDIO] Alarm stopped - driver awake.")
+
+    def _loop(self):
+        while self._playing:
+            try:
+                from playsound import playsound
+                if os.path.exists(self.sound_path):
+                    playsound(self.sound_path, block=True)
+                else:
+                    print("\a", end="", flush=True)
+                    time.sleep(1)
+            except Exception:
+                time.sleep(1)
+
+
+class AlertManager:
+    """
+    Two-stage alert system:
+
+    Stage 1 - Any drowsiness signal detected:
+      -> Audio alarm starts looping immediately
+
+    Stage 2 - Drowsiness sustained for CONFIRM_SECONDS (default 6s):
+      -> Call + SMS + WhatsApp + Email fire once
+      -> Repeats every CALL_COOLDOWN seconds if still drowsy
+
+    Audio stops automatically when driver wakes up.
+    """
+
+    CONFIRM_SECONDS = 8    # seconds before calls fire
+    CALL_COOLDOWN   = 60   # min seconds between repeated calls
+
+    def __init__(self, cooldown=None):
+        self.CALL_COOLDOWN    = cooldown or self.CALL_COOLDOWN
+        self._audio           = AudioAlarm()
+        self._drowsy_since    = None
+        self._call_sent_at    = None
+        self._alert_count     = 0
+        self._last_print      = -1
+
+    def update(self, is_drowsy, alert_score=0, reason=""):
+        """
+        Call every frame.
+        is_drowsy : bool  - True if any drowsiness signal active
+        reason    : str   - signal description for SMS/email
+        """
+        now = datetime.now()
+
+        if is_drowsy:
+            # Stage 1 - audio starts immediately
+            self._audio.start()
+
+            # Track drowsy start time
+            if self._drowsy_since is None:
+                self._drowsy_since = now
+                print(f"[WARNING] Drowsiness detected - audio started.")
+                print(f"[WAITING] Calls/SMS fire in {self.CONFIRM_SECONDS}s if sustained...")
+
+            seconds_drowsy = (now - self._drowsy_since).total_seconds()
+            remaining      = max(0, self.CONFIRM_SECONDS - seconds_drowsy)
+
+            # Print countdown every second
+            if int(seconds_drowsy) != self._last_print:
+                self._last_print = int(seconds_drowsy)
+                if seconds_drowsy < self.CONFIRM_SECONDS:
+                    print(f"[COUNTDOWN] {int(seconds_drowsy)}s / {self.CONFIRM_SECONDS}s - call fires in {int(remaining)+1}s")
+
+            # Stage 2 - fire calls after delay
+            if seconds_drowsy >= self.CONFIRM_SECONDS:
+                call_ok = (
+                    self._call_sent_at is None or
+                    (now - self._call_sent_at).total_seconds() >= self.CALL_COOLDOWN
+                )
+                if call_ok:
+                    self._alert_count += 1
+                    self._call_sent_at = now
+                    print(f"\n{'='*48}")
+                    print(f"  CRITICAL ALERT #{self._alert_count} FIRING")
+                    print(f"  Reason  : {reason}")
+                    print(f"  Drowsy  : {seconds_drowsy:.1f}s")
+                    print(f"  Time    : {now.strftime('%H:%M:%S')}")
+                    print(f"{'='*48}\n")
+                    threading.Thread(target=send_twilio_call,                                      daemon=True).start()
+                    threading.Thread(target=lambda: send_twilio_sms(f"DDS ALERT: {reason}"),       daemon=True).start()
+                    threading.Thread(target=lambda: send_whatsapp_alert(f"DDS ALERT\n{reason}"),   daemon=True).start()
+                    threading.Thread(target=lambda: send_email_alert(reason=reason),               daemon=True).start()
+
+        else:
+            # Driver woke up
+            if self._drowsy_since is not None:
+                elapsed = (now - self._drowsy_since).total_seconds()
+                print(f"[AWAKE] Driver awake after {elapsed:.1f}s - alarm stopped.")
+            self._audio.stop()
+            self._drowsy_since = None
+            self._last_print   = -1
+
+    def get_countdown(self):
+        """Seconds remaining before critical alert fires."""
+        if self._drowsy_since is None:
+            return self.CONFIRM_SECONDS
+        elapsed = (datetime.now() - self._drowsy_since).total_seconds()
+        return max(0, self.CONFIRM_SECONDS - elapsed)
+
+    def is_confirmed(self):
+        """True if drowsy long enough for critical alert."""
+        if self._drowsy_since is None:
+            return False
+        return (datetime.now() - self._drowsy_since).total_seconds() >= self.CONFIRM_SECONDS
